@@ -1,0 +1,70 @@
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "api/**/*.js",
+            "use": "@vercel/node"
+        }
+    ],
+    "routes": [
+        {
+            "src": "/api/ads/(.*)",
+            "dest": "/api/ads/$1"
+        },
+        {
+            "src": "/api/(.*)",
+            "dest": "/api/$1"
+        },
+        {
+            "src": "/save",
+            "dest": "/api/save"
+        },
+        {
+            "src": "/register_new",
+            "dest": "/api/register_new"
+        },
+        {
+            "src": "/users.json",
+            "dest": "/api/users"
+        },
+        {
+            "src": "/asset/(.*)",
+            "dest": "/asset/$1"
+        },
+        {
+            "src": "/models/(.*)",
+            "dest": "/public/models/$1"
+        },
+        {
+            "src": "/",
+            "dest": "/public/index.html"
+        },
+        {
+            "src": "/(.*\\.(html|css|js|json|png|jpg|jpeg|gif|webp|svg|ico))",
+            "dest": "/public/$1"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/public/$1"
+        }
+    ],
+    "headers": [
+        {
+            "source": "/api/(.*)",
+            "headers": [
+                {
+                    "key": "Access-Control-Allow-Origin",
+                    "value": "*"
+                },
+                {
+                    "key": "Access-Control-Allow-Methods",
+                    "value": "GET, POST, OPTIONS"
+                },
+                {
+                    "key": "Access-Control-Allow-Headers",
+                    "value": "Content-Type"
+                }
+            ]
+        }
+    ]
+}
