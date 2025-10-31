@@ -29,6 +29,7 @@ async function downloadIfMissing() {
     "ssd_mobilenetv1_model-weights_manifest.json",
     "face_landmark_68_model-weights_manifest.json",
     "face_recognition_model-weights_manifest.json",
+    "age_gender_model-weights_manifest.json",
   ];
 
   // First, check what files we have and what we need

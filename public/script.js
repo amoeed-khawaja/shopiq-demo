@@ -13,6 +13,7 @@ async function init() {
     await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
     await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
     await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
+    await faceapi.nets.ageGenderNet.loadFromUri("/models");
     log.innerText = "Models loaded successfully!";
     await loadUsers();
     await startVideo();
@@ -75,33 +76,81 @@ async function startVideo() {
   }
 }
 
-function drawBox(box, label, score) {
+function drawBox(box, label, score, age, gender, genderProbability) {
   const ctx = canvas.getContext("2d");
 
   // Calculate flipped x coordinate to match the flipped video
   // Video is flipped with CSS scaleX(-1), so we need to mirror x coordinates
   const flippedX = canvas.width - box.x - box.width;
 
-  // Draw bounding box
+  // Draw bounding box with modern styling
   ctx.lineWidth = 3;
-  ctx.strokeStyle = "#00FF00";
+  ctx.strokeStyle = "#4ade80";
+  ctx.shadowColor = "rgba(74, 222, 128, 0.5)";
+  ctx.shadowBlur = 10;
   ctx.strokeRect(flippedX, box.y, box.width, box.height);
+  ctx.shadowBlur = 0;
 
-  // Draw label background
-  const txt =
-    label +
-    (score !== undefined && score > 0 ? " (" + score.toFixed(2) + ")" : "");
-  ctx.font = "bold 16px Arial";
-  const textMetrics = ctx.measureText(txt);
-  const textWidth = textMetrics.width;
-  const textHeight = 20;
+  // Build label text - first line: user ID or status
+  let labelText = label;
+  if (score !== undefined && score > 0) {
+    labelText += ` (${score.toFixed(2)})`;
+  }
 
-  ctx.fillStyle = "rgba(0, 150, 0, 0.8)";
-  ctx.fillRect(flippedX, box.y - textHeight - 2, textWidth + 12, textHeight);
+  // Build age/gender text - second line
+  let ageGenderText = "";
+  if (age !== undefined && gender !== undefined) {
+    ageGenderText = `${Math.round(age)} years, ${gender}`;
+  }
 
-  // Draw label text normally (canvas is not flipped, so text renders correctly)
+  // Calculate text dimensions
+  ctx.font = "bold 14px Arial";
+  const labelMetrics = ctx.measureText(labelText);
+  let maxWidth = labelMetrics.width;
+
+  if (ageGenderText) {
+    ctx.font = "12px Arial";
+    const ageGenderMetrics = ctx.measureText(ageGenderText);
+    maxWidth = Math.max(maxWidth, ageGenderMetrics.width);
+  }
+
+  const textWidth = maxWidth;
+  const textHeight = ageGenderText ? 40 : 20; // More height if showing age/gender
+
+  // Draw label background with rounded corners
+  ctx.fillStyle = "rgba(74, 222, 128, 0.95)";
+  const x = flippedX;
+  const y = box.y - textHeight - 2;
+  const w = textWidth + 16;
+  const h = textHeight;
+  const r = 8;
+
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+
+  // Draw label text (user ID/status)
   ctx.fillStyle = "#fff";
-  ctx.fillText(txt, flippedX + 6, box.y - 6);
+  ctx.font =
+    "bold 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  ctx.fillText(labelText, flippedX + 8, box.y - textHeight + 18);
+
+  // Draw age/gender on second line if available
+  if (ageGenderText) {
+    ctx.font =
+      "13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.fillText(ageGenderText, flippedX + 8, box.y - textHeight + 34);
+  }
 }
 
 function clearCanvas() {
@@ -210,7 +259,14 @@ async function detectLoop() {
     if (lastBoxes.length > 0) {
       clearCanvas();
       for (const cached of lastBoxes) {
-        drawBox(cached.box, cached.label, cached.score);
+        drawBox(
+          cached.box,
+          cached.label,
+          cached.score,
+          cached.age,
+          cached.gender,
+          cached.genderProbability
+        );
       }
     }
     requestAnimationFrame(detectLoop);
@@ -223,7 +279,14 @@ async function detectLoop() {
     if (lastBoxes.length > 0) {
       clearCanvas();
       for (const cached of lastBoxes) {
-        drawBox(cached.box, cached.label, cached.score);
+        drawBox(
+          cached.box,
+          cached.label,
+          cached.score,
+          cached.age,
+          cached.gender,
+          cached.genderProbability
+        );
       }
     }
     requestAnimationFrame(detectLoop);
@@ -237,11 +300,12 @@ async function detectLoop() {
     // Run detection asynchronously without blocking the animation loop
     const runDetection = async () => {
       try {
-        // Detect faces with landmarks and descriptors
+        // Detect faces with landmarks, descriptors, age and gender
         const detections = await faceapi
           .detectAllFaces(video)
           .withFaceLandmarks()
-          .withFaceDescriptors();
+          .withFaceDescriptors()
+          .withAgeAndGender();
 
         // Resize detections to match canvas dimensions
         const resizedDetections = faceapi.resizeResults(detections || [], {
@@ -258,6 +322,11 @@ async function detectLoop() {
             const descriptor = Array.from(det.descriptor);
             const match = findBestMatch(descriptor);
 
+            // Extract age and gender information
+            const age = det.age;
+            const gender = det.gender;
+            const genderProbability = det.genderProbability;
+
             let label, score;
             if (match.user && match.distance < THRESHOLD) {
               // recognized existing user
@@ -270,10 +339,17 @@ async function detectLoop() {
               registerNewUser(descriptor); // Non-blocking call
             }
 
-            // Draw box immediately
-            drawBox(box, label, score);
+            // Draw box with age and gender info
+            drawBox(box, label, score, age, gender, genderProbability);
             // Cache for smooth updates
-            lastBoxes.push({ box, label, score });
+            lastBoxes.push({
+              box,
+              label,
+              score,
+              age,
+              gender,
+              genderProbability,
+            });
           }
 
           // Update log if user count changed (check in background)

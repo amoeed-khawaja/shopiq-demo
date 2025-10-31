@@ -1,18 +1,27 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Face Recognition Demo</title>
+  <title>Face Recognition Demo - AI Powered</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Real-time face recognition with age and gender estimation using AI" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <h1>Face Recognition Demo</h1>
-  <div id="video-wrap">
-    <video id="inputVideo" autoplay muted playsinline></video>
-    <canvas id="overlay"></canvas>
+  <div class="container">
+    <header>
+      <h1>🎭 Face Recognition</h1>
+      <p class="subtitle">Real-time AI-powered face detection, recognition, age & gender estimation</p>
+    </header>
+    
+    <div id="video-wrap">
+      <video id="inputVideo" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    
+    <div id="log">Initializing...</div>
   </div>
-  <div id="log"></div>
+  
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
   <script src="script.js"></script>
 </body>
