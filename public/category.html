@@ -40,7 +40,7 @@
 
     .container {
       text-align: center;
-      max-width: 600px;
+      max-width: 900px;
       width: 100%;
       position: relative;
       z-index: 1;
@@ -63,7 +63,7 @@
     .subtitle {
       font-size: 1rem;
       opacity: 0.95;
-      margin-bottom: 3rem;
+      margin-bottom: 2rem;
       font-weight: 300;
     }
 
@@ -71,50 +71,88 @@
       background: rgba(255, 255, 255, 0.15);
       backdrop-filter: blur(15px);
       border-radius: 20px;
-      padding: 3rem 2rem;
+      padding: 2rem;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
       border: 2px solid rgba(255, 255, 255, 0.2);
-      min-height: 200px;
+      min-height: 400px;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      position: relative;
+    }
+
+    #adImage {
+      max-width: 100%;
+      max-height: 500px;
+      width: auto;
+      height: auto;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      object-fit: contain;
+      display: none;
+      margin-bottom: 1.5rem;
+      transition: opacity 0.3s ease;
+    }
+
+    #adImage.loaded {
+      display: block;
+    }
+
+    #adImage.fade-in {
+      animation: fadeIn 0.5s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.95);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
     }
 
     .category-label {
       font-size: 0.95rem;
       opacity: 0.9;
-      margin-bottom: 1.5rem;
+      margin-bottom: 1rem;
       text-transform: uppercase;
       letter-spacing: 3px;
       font-weight: 600;
     }
 
-    .category-text {
-      font-size: 4rem;
+    #categoryText {
+      font-size: 2.5rem;
       font-weight: 700;
       text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.3);
-      min-height: 80px;
+      min-height: 60px;
       display: flex;
       align-items: center;
       justify-content: center;
       transition: all 0.3s ease;
+      margin-top: 1rem;
     }
 
-    .category-text.active {
+    #categoryText.active {
       color: #93c5fd;
       text-shadow: 0 0 30px rgba(147, 197, 253, 0.6);
     }
 
-    .category-text.no-category {
+    #categoryText.no-category {
       color: rgba(255, 255, 255, 0.5);
-      font-size: 2rem;
+      font-size: 1.5rem;
     }
 
     .status {
-      margin-top: 2rem;
+      margin-top: 1.5rem;
       font-size: 0.9rem;
       opacity: 0.8;
+    }
+
+    #categoryText.connecting {
+      animation: pulse 2s ease-in-out infinite;
     }
 
     @keyframes pulse {
@@ -126,10 +164,6 @@
       }
     }
 
-    .category-text.connecting {
-      animation: pulse 2s ease-in-out infinite;
-    }
-
     @media (max-width: 768px) {
       .logo {
         max-width: 150px;
@@ -139,12 +173,16 @@
         font-size: 1.5rem;
       }
 
-      .category-text {
-        font-size: 3rem;
+      #categoryText {
+        font-size: 2rem;
       }
 
-      .category-text.no-category {
-        font-size: 1.5rem;
+      #categoryText.no-category {
+        font-size: 1.2rem;
+      }
+
+      #adImage {
+        max-height: 350px;
       }
     }
   </style>
@@ -157,16 +195,237 @@
     
     <div class="category-display">
       <div class="category-label">Current Category</div>
+      <img id="adImage" alt="Advertisement" />
       <div id="categoryText" class="category-text connecting">Connecting...</div>
       <div class="status" id="status">Waiting for camera feed...</div>
     </div>
   </div>
 
   <script>
+    // Category to folder name mapping
+    const categoryFolderMap = {
+      'Kids': 'kids',
+      'Teen': 'teen',
+      'Young Adults': 'young adults',
+      'Adults': 'adults',
+      'Senior Adults': 'senior adults'
+    };
+
+    // Image cache: { folderPath: [imagePaths] }
+    const imageCache = {};
+    let allImagesLoaded = false;
+
     const categoryText = document.getElementById("categoryText");
     const statusEl = document.getElementById("status");
+    const adImage = document.getElementById("adImage");
     let lastCategory = null;
-    let updateCount = 0;
+    let lastGender = null;
+    let imageChangeTimer = null;
+    let lastImageChangeTime = 0;
+    const MIN_IMAGE_DISPLAY_TIME = 3000; // 3 seconds
+
+    // Load all images at startup
+    async function loadAllImages() {
+      statusEl.textContent = "Loading advertisements...";
+      
+      const categories = Object.keys(categoryFolderMap);
+      const loadPromises = [];
+
+      for (const category of categories) {
+        if (category === 'Adults') {
+          // Load male and female subfolders for adults
+          loadPromises.push(fetchImageListFromAPI(category, 'male'));
+          loadPromises.push(fetchImageListFromAPI(category, 'female'));
+        } else {
+          loadPromises.push(fetchImageListFromAPI(category));
+        }
+      }
+
+      // Always try to load common folder (if it exists) for mixed categories
+      loadPromises.push(fetchImageListFromAPI(null)); // This will fetch common folder
+
+      try {
+        await Promise.all(loadPromises);
+        // Preload all images
+        await preloadAllImages();
+        allImagesLoaded = true;
+        statusEl.textContent = "Ready. Waiting for detection...";
+        console.log('All images loaded:', imageCache);
+      } catch (error) {
+        console.error('Error loading images:', error);
+        statusEl.textContent = "Ready. Some images may load on demand...";
+        allImagesLoaded = true; // Still continue even if some failed
+      }
+    }
+
+    // Fetch image list from API
+    async function fetchImageListFromAPI(category, gender = null) {
+      // Handle common folder
+      if (!category) {
+        try {
+          const response = await fetch('/api/ads/common');
+          if (response.ok) {
+            const data = await response.json();
+            imageCache['common'] = data.images || [];
+          } else {
+            imageCache['common'] = [];
+          }
+        } catch (error) {
+          console.error('Error fetching common images:', error);
+          imageCache['common'] = [];
+        }
+        return;
+      }
+
+      const categorySlug = category.toLowerCase().replace(/\s+/g, '-');
+      let url = `/api/ads/${categorySlug}`;
+      if (category === 'Adults' && gender) {
+        url += `?gender=${gender}`;
+      }
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.warn(`Failed to fetch images for ${category}:`, response.status);
+          return;
+        }
+        const data = await response.json();
+        
+        let cacheKey;
+        if (category === 'Adults') {
+          if (gender) {
+            cacheKey = `adults_${gender.toLowerCase()}`;
+          } else {
+            // If no gender, try male as default
+            cacheKey = 'adults_male';
+          }
+        } else {
+          cacheKey = categoryFolderMap[category];
+        }
+        
+        imageCache[cacheKey] = data.images || [];
+      } catch (error) {
+        console.error(`Error fetching images for ${category}:`, error);
+        let cacheKey;
+        if (category === 'Adults') {
+          cacheKey = gender ? `adults_${gender.toLowerCase()}` : 'adults_male';
+        } else {
+          cacheKey = categoryFolderMap[category];
+        }
+        imageCache[cacheKey] = [];
+      }
+    }
+
+    // Preload all cached images
+    async function preloadAllImages() {
+      const preloadPromises = [];
+      for (const [key, images] of Object.entries(imageCache)) {
+        for (const imagePath of images) {
+          const promise = new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve();
+            img.onerror = () => resolve(); // Continue even if image fails
+            img.src = imagePath;
+          });
+          preloadPromises.push(promise);
+        }
+      }
+      await Promise.all(preloadPromises);
+    }
+
+    // Get image list for a category/gender
+    async function getImageList(category, gender = null) {
+      // If category is null/mixed, use common folder
+      if (!category) {
+        if (!imageCache['common']) {
+          imageCache['common'] = [];
+        }
+        if (imageCache['common'].length === 0) {
+          await fetchImageListFromAPI(null); // Fetch common folder
+        }
+        return imageCache['common'] || [];
+      }
+
+      const folderName = categoryFolderMap[category];
+      if (!folderName) return [];
+
+      let cacheKey;
+      if (category === 'Adults') {
+        // For adults, always use gender-specific folder if gender is provided
+        if (gender) {
+          cacheKey = `adults_${gender.toLowerCase()}`;
+        } else {
+          // If no gender provided for adults, try to use common or male as fallback
+          cacheKey = 'adults_male'; // Default fallback
+        }
+      } else {
+        cacheKey = folderName;
+      }
+
+      if (!imageCache[cacheKey]) {
+        imageCache[cacheKey] = [];
+      }
+
+      // If cache is empty, try to fetch from server
+      if (imageCache[cacheKey].length === 0) {
+        await fetchImageListFromAPI(category, gender);
+      }
+
+      return imageCache[cacheKey] || [];
+    }
+
+    // Display a random image for a category
+    async function displayImageForCategory(category, gender = null) {
+      const imageList = await getImageList(category, gender);
+      if (imageList.length === 0) {
+        console.warn(`No images found for category: ${category}, gender: ${gender}`);
+        adImage.style.display = 'none';
+        adImage.classList.remove('loaded');
+        return;
+      }
+
+      // Select random image
+      const randomIndex = Math.floor(Math.random() * imageList.length);
+      const imagePath = imageList[randomIndex];
+
+      // Preload image
+      const img = new Image();
+      img.onload = () => {
+        adImage.src = imagePath;
+        adImage.style.display = 'block';
+        adImage.classList.add('loaded', 'fade-in');
+        setTimeout(() => {
+          adImage.classList.remove('fade-in');
+        }, 500);
+      };
+      img.onerror = () => {
+        console.error('Failed to load image:', imagePath);
+        // Try next image in list if available
+        if (imageList.length > 1) {
+          const nextIndex = (randomIndex + 1) % imageList.length;
+          const nextPath = imageList[nextIndex];
+          const nextImg = new Image();
+          nextImg.onload = () => {
+            adImage.src = nextPath;
+            adImage.style.display = 'block';
+            adImage.classList.add('loaded', 'fade-in');
+            setTimeout(() => {
+              adImage.classList.remove('fade-in');
+            }, 500);
+          };
+          nextImg.onerror = () => {
+            console.error('Failed to load backup image:', nextPath);
+            adImage.style.display = 'none';
+            adImage.classList.remove('loaded');
+          };
+          nextImg.src = nextPath;
+        } else {
+          adImage.style.display = 'none';
+          adImage.classList.remove('loaded');
+        }
+      };
+      img.src = imagePath;
+    }
 
     function updateCategory() {
       try {
@@ -174,7 +433,12 @@
         if (!dataStr) {
           categoryText.textContent = "No Data";
           categoryText.className = "category-text no-category";
-          statusEl.textContent = "Waiting for detection data...";
+          statusEl.textContent = "Waiting for detection - showing general advertisements";
+          // Show common folder images while waiting
+          if (lastCategory !== null || !adImage.classList.contains('loaded')) {
+            lastCategory = null;
+            displayImageForCategory(null); // Show common folder images
+          }
           return;
         }
 
@@ -186,38 +450,52 @@
         if (age > 3000) {
           categoryText.textContent = "No Detection";
           categoryText.className = "category-text no-category";
-          statusEl.textContent = "No active detection (data stale)";
-          lastCategory = null;
+          statusEl.textContent = "No active detection - showing general advertisements";
+          // Show common folder images when no detection
+          if (lastCategory !== null || !adImage.classList.contains('loaded')) {
+            lastCategory = null;
+            displayImageForCategory(null); // Show common folder images
+          }
           return;
         }
 
-        updateCount++;
         const category = data.category;
+        const gender = data.gender;
 
-        if (category !== lastCategory) {
-          // Category changed - animate
-          categoryText.style.transform = "scale(0.9)";
-          setTimeout(() => {
-            categoryText.style.transform = "scale(1)";
-            categoryText.textContent = category || "Mixed";
-            categoryText.className = category 
-              ? "category-text active" 
-              : "category-text no-category";
-            
-            if (category) {
-              statusEl.textContent = `✓ ${category} category detected (${Math.floor(age/1000)}s ago)`;
-            } else {
-              statusEl.textContent = "No majority category (mixed crowd)";
-            }
-          }, 150);
+        // Check if we need to change image (category or gender changed)
+        const categoryChanged = category !== lastCategory;
+        const genderChanged = gender !== lastGender && category === 'Adults';
+
+        if (categoryChanged || genderChanged) {
+          // Check if minimum display time has passed
+          const timeSinceLastChange = now - lastImageChangeTime;
           
-          lastCategory = category;
+          if (timeSinceLastChange >= MIN_IMAGE_DISPLAY_TIME || lastImageChangeTime === 0) {
+            // Can change image immediately
+            lastImageChangeTime = now;
+            handleCategoryChange(category, gender);
+          } else {
+            // Need to wait, set a timer
+            if (imageChangeTimer) {
+              clearTimeout(imageChangeTimer);
+            }
+            const remainingTime = MIN_IMAGE_DISPLAY_TIME - timeSinceLastChange;
+            imageChangeTimer = setTimeout(() => {
+              lastImageChangeTime = Date.now();
+              handleCategoryChange(category, gender);
+            }, remainingTime);
+          }
         } else {
-          // Same category - just update status
+          // Same category - ensure image is still displayed
+          // Check if image is visible, if not, display it
+          if (!adImage.classList.contains('loaded') || adImage.style.display === 'none') {
+            displayImageForCategory(category, gender);
+          }
+          // Just update status
           if (category) {
             statusEl.textContent = `✓ ${category} category (${Math.floor(age/1000)}s ago)`;
           } else {
-            statusEl.textContent = "No majority category (mixed crowd)";
+            statusEl.textContent = "Mixed crowd - showing general advertisements";
           }
         }
       } catch (e) {
@@ -228,18 +506,45 @@
       }
     }
 
-    // Check for updates every 100ms
-    setInterval(updateCategory, 100);
+    function handleCategoryChange(category, gender) {
+      // Update category text
+      categoryText.style.transform = "scale(0.9)";
+      setTimeout(() => {
+        categoryText.style.transform = "scale(1)";
+        categoryText.textContent = category || "Mixed";
+        categoryText.className = category 
+          ? "category-text active" 
+          : "category-text no-category";
+      }, 150);
 
-    // Also listen for storage events (when data changes in another tab)
-    window.addEventListener("storage", (e) => {
-      if (e.key === "dominantAgeCategory") {
-        updateCategory();
+      // Update image - always display, use common folder if category is null/mixed
+      displayImageForCategory(category, gender);
+      
+      const now = Date.now();
+      const data = JSON.parse(localStorage.getItem("dominantAgeCategory") || "{}");
+      const age = now - (data.timestamp || now);
+      
+      if (category) {
+        statusEl.textContent = `✓ ${category} category detected (${Math.floor(age/1000)}s ago)`;
+      } else {
+        statusEl.textContent = "Mixed crowd - showing general advertisements";
       }
-    });
 
-    // Initial update
-    updateCategory();
+      lastCategory = category;
+      lastGender = gender;
+    }
+
+    // Initialize: Load all images first
+    loadAllImages().then(() => {
+      // Start checking for updates
+      setInterval(updateCategory, 100);
+      window.addEventListener("storage", (e) => {
+        if (e.key === "dominantAgeCategory") {
+          updateCategory();
+        }
+      });
+      updateCategory();
+    });
   </script>
 </body>
 </html>

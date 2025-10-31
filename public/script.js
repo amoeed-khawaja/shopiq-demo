@@ -36,16 +36,40 @@ function calculateDominantCategory(detections) {
   const categoryCounts = {};
   recentDetections.forEach((d) => {
     if (d.category) {
-      categoryCounts[d.category] = (categoryCounts[d.category] || 0) + 1;
+      if (!categoryCounts[d.category]) {
+        categoryCounts[d.category] = {
+          count: 0,
+          genders: { male: 0, female: 0 },
+        };
+      }
+      categoryCounts[d.category].count++;
+      if (
+        d.gender &&
+        (d.gender.toLowerCase() === "male" ||
+          d.gender.toLowerCase() === "female")
+      ) {
+        categoryCounts[d.category].genders[d.gender.toLowerCase()]++;
+      }
     }
   });
 
   // Find category with majority (50%+) representation
   const total = recentDetections.length;
-  for (const [category, count] of Object.entries(categoryCounts)) {
-    const percentage = (count / total) * 100;
+  for (const [category, data] of Object.entries(categoryCounts)) {
+    const percentage = (data.count / total) * 100;
     if (percentage >= 50) {
-      return category;
+      // Calculate dominant gender for this category
+      const genderCount = data.genders.male + data.genders.female;
+      let dominantGender = null;
+      if (genderCount > 0) {
+        dominantGender =
+          data.genders.male > data.genders.female
+            ? "male"
+            : data.genders.female > data.genders.male
+            ? "female"
+            : null;
+      }
+      return { category, gender: dominantGender };
     }
   }
 
@@ -53,9 +77,10 @@ function calculateDominantCategory(detections) {
 }
 
 // Broadcast category to parallel page via localStorage
-function broadcastCategory(category) {
+function broadcastCategory(result) {
   const data = {
-    category: category,
+    category: result ? result.category : null,
+    gender: result ? result.gender : null,
     timestamp: Date.now(),
   };
   localStorage.setItem("dominantAgeCategory", JSON.stringify(data));
@@ -401,12 +426,13 @@ async function detectLoop() {
             // Get age category
             const ageCategory = getAgeCategory(Math.round(age));
 
-            // Track detection with category
+            // Track detection with category and gender
             if (ageCategory) {
               currentDetections.push({
                 age: Math.round(age),
                 category: ageCategory.category,
                 ageGroup: ageCategory.ageGroup,
+                gender: gender, // Include gender for category-specific ads
                 timestamp: Date.now(),
               });
             }

@@ -11,6 +11,7 @@ const MODELS_DIR = path.join(__dirname, "public", "models");
 
 app.use(bodyParser.json({ limit: "5mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/asset", express.static(path.join(__dirname, "asset")));
 
 // Ensure users.json exists
 if (!fs.existsSync(USERS_FILE)) {
@@ -154,6 +155,61 @@ app.post("/register_new", (req, res) => {
   } catch (e) {
     console.error("register error", e);
     return res.status(500).json({ error: "register failed" });
+  }
+});
+
+app.get("/api/ads/:category", (req, res) => {
+  // Return list of image files for a category
+  try {
+    const category = req.params.category;
+    const categoryFolderMap = {
+      kids: "kids",
+      teen: "teen",
+      "young-adults": "young adults",
+      adults: "adults",
+      "senior-adults": "senior adults",
+      common: "common",
+    };
+
+    const folderName = categoryFolderMap[category];
+    if (!folderName) {
+      return res.json({ images: [] });
+    }
+
+    let folderPath;
+    if (req.query.gender && folderName === "adults") {
+      folderPath = path.join(
+        __dirname,
+        "asset",
+        "ads",
+        folderName,
+        req.query.gender.toLowerCase()
+      );
+    } else {
+      folderPath = path.join(__dirname, "asset", "ads", folderName);
+    }
+
+    if (!fs.existsSync(folderPath)) {
+      return res.json({ images: [] });
+    }
+
+    const files = fs.readdirSync(folderPath);
+    const imageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+    const imageFiles = files
+      .filter((file) =>
+        imageExtensions.some((ext) => file.toLowerCase().endsWith(ext))
+      )
+      .map((file) => {
+        if (req.query.gender && folderName === "adults") {
+          return `/asset/ads/${folderName}/${req.query.gender.toLowerCase()}/${file}`;
+        }
+        return `/asset/ads/${folderName}/${file}`;
+      });
+
+    return res.json({ images: imageFiles });
+  } catch (e) {
+    console.error("Error listing ads:", e);
+    return res.status(500).json({ error: "Failed to list ads" });
   }
 });
 
