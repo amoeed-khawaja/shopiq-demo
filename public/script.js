@@ -7,6 +7,62 @@ const log = document.getElementById("log");
 let users = []; // loaded from server: [{id, descriptors: [[...], ...]}, ...]
 const THRESHOLD = 0.55; // distance threshold for recognition (lower = stricter)
 
+// Age category definitions
+function getAgeCategory(age) {
+  if (age >= 5 && age <= 10) return { category: "Kids", ageGroup: "5-10" };
+  if (age >= 11 && age <= 15) return { category: "Teen", ageGroup: "11-15" };
+  if (age >= 16 && age <= 22)
+    return { category: "Young Adults", ageGroup: "16-22" };
+  if (age >= 23 && age <= 35) return { category: "Adults", ageGroup: "23-35" };
+  if (age >= 36 && age <= 50)
+    return { category: "Senior Adults", ageGroup: "36-50" };
+  return null; // Outside defined ranges
+}
+
+// Track current detected users and their categories
+let currentDetections = []; // {age, category, timestamp}
+
+// Calculate dominant category (80%+ threshold)
+function calculateDominantCategory(detections) {
+  if (!detections || detections.length === 0) return null;
+
+  // Remove old detections (older than 2 seconds)
+  const now = Date.now();
+  const recentDetections = detections.filter((d) => now - d.timestamp < 2000);
+
+  if (recentDetections.length === 0) return null;
+
+  // Count by category
+  const categoryCounts = {};
+  recentDetections.forEach((d) => {
+    if (d.category) {
+      categoryCounts[d.category] = (categoryCounts[d.category] || 0) + 1;
+    }
+  });
+
+  // Find category with 80%+ representation
+  const total = recentDetections.length;
+  for (const [category, count] of Object.entries(categoryCounts)) {
+    const percentage = (count / total) * 100;
+    if (percentage >= 80) {
+      return category;
+    }
+  }
+
+  return null; // No category reaches 80% threshold
+}
+
+// Broadcast category to parallel page via localStorage
+function broadcastCategory(category) {
+  const data = {
+    category: category,
+    timestamp: Date.now(),
+  };
+  localStorage.setItem("dominantAgeCategory", JSON.stringify(data));
+  // Also dispatch custom event for same-tab listeners
+  window.dispatchEvent(new CustomEvent("categoryUpdate", { detail: data }));
+}
+
 async function init() {
   try {
     log.innerText = "Loading face recognition models...";
@@ -76,7 +132,15 @@ async function startVideo() {
   }
 }
 
-function drawBox(box, label, score, age, gender, genderProbability) {
+function drawBox(
+  box,
+  label,
+  score,
+  age,
+  gender,
+  genderProbability,
+  ageCategory = null
+) {
   const ctx = canvas.getContext("2d");
 
   // Calculate flipped x coordinate to match the flipped video
@@ -97,10 +161,15 @@ function drawBox(box, label, score, age, gender, genderProbability) {
     labelText += ` (${score.toFixed(2)})`;
   }
 
-  // Build age/gender text - second line
+  // Build age/gender/category text - second line
   let ageGenderText = "";
   if (age !== undefined && gender !== undefined) {
-    ageGenderText = `${Math.round(age)} years, ${gender}`;
+    const ageNum = Math.round(age);
+    if (ageCategory) {
+      ageGenderText = `${ageNum}y ${gender} • ${ageCategory.category}`;
+    } else {
+      ageGenderText = `${ageNum} years, ${gender}`;
+    }
   }
 
   // Calculate text dimensions
@@ -265,7 +334,8 @@ async function detectLoop() {
           cached.score,
           cached.age,
           cached.gender,
-          cached.genderProbability
+          cached.genderProbability,
+          cached.ageCategory
         );
       }
     }
@@ -285,7 +355,8 @@ async function detectLoop() {
           cached.score,
           cached.age,
           cached.gender,
-          cached.genderProbability
+          cached.genderProbability,
+          cached.ageCategory
         );
       }
     }
@@ -317,6 +388,9 @@ async function detectLoop() {
         lastBoxes = []; // Clear cached boxes
 
         if (resizedDetections && resizedDetections.length > 0) {
+          // Update current detections with age categories
+          currentDetections = [];
+
           for (const det of resizedDetections) {
             const box = det.detection.box;
             const descriptor = Array.from(det.descriptor);
@@ -326,6 +400,19 @@ async function detectLoop() {
             const age = det.age;
             const gender = det.gender;
             const genderProbability = det.genderProbability;
+
+            // Get age category
+            const ageCategory = getAgeCategory(Math.round(age));
+
+            // Track detection with category
+            if (ageCategory) {
+              currentDetections.push({
+                age: Math.round(age),
+                category: ageCategory.category,
+                ageGroup: ageCategory.ageGroup,
+                timestamp: Date.now(),
+              });
+            }
 
             let label, score;
             if (match.user && match.distance < THRESHOLD) {
@@ -339,8 +426,16 @@ async function detectLoop() {
               registerNewUser(descriptor); // Non-blocking call
             }
 
-            // Draw box with age and gender info
-            drawBox(box, label, score, age, gender, genderProbability);
+            // Draw box with age, gender, and category info
+            drawBox(
+              box,
+              label,
+              score,
+              age,
+              gender,
+              genderProbability,
+              ageCategory
+            );
             // Cache for smooth updates
             lastBoxes.push({
               box,
@@ -349,8 +444,13 @@ async function detectLoop() {
               age,
               gender,
               genderProbability,
+              ageCategory,
             });
           }
+
+          // Calculate and broadcast dominant category
+          const dominantCategory = calculateDominantCategory(currentDetections);
+          broadcastCategory(dominantCategory);
 
           // Update log if user count changed (check in background)
           if (users.length !== lastUserCount) {
@@ -359,6 +459,10 @@ async function detectLoop() {
               users.length
             } users: ${users.map((u) => u.id).join(", ")})`;
           }
+        } else {
+          // No detections - clear category
+          currentDetections = [];
+          broadcastCategory(null);
         }
       } catch (e) {
         console.error("Detection error", e);

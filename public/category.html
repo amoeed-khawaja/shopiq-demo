@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Age Category Monitor</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Real-time age category display" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      color: white;
+    }
+
+    .container {
+      text-align: center;
+      max-width: 600px;
+      width: 100%;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .subtitle {
+      font-size: 1.2rem;
+      opacity: 0.9;
+      margin-bottom: 3rem;
+      font-weight: 300;
+    }
+
+    .category-display {
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 3rem 2rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      min-height: 200px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .category-label {
+      font-size: 1rem;
+      opacity: 0.8;
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      font-weight: 600;
+    }
+
+    .category-text {
+      font-size: 4rem;
+      font-weight: 700;
+      text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.3);
+      min-height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+
+    .category-text.active {
+      color: #4ade80;
+      text-shadow: 0 0 20px rgba(74, 222, 128, 0.5);
+    }
+
+    .category-text.no-category {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 2rem;
+    }
+
+    .status {
+      margin-top: 2rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.7;
+      }
+    }
+
+    .category-text.connecting {
+      animation: pulse 2s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Age Category Monitor</h1>
+    <p class="subtitle">Dominant Age Category (80%+ threshold)</p>
+    
+    <div class="category-display">
+      <div class="category-label">Current Category</div>
+      <div id="categoryText" class="category-text connecting">Connecting...</div>
+      <div class="status" id="status">Waiting for camera feed...</div>
+    </div>
+  </div>
+
+  <script>
+    const categoryText = document.getElementById("categoryText");
+    const statusEl = document.getElementById("status");
+    let lastCategory = null;
+    let updateCount = 0;
+
+    function updateCategory() {
+      try {
+        const dataStr = localStorage.getItem("dominantAgeCategory");
+        if (!dataStr) {
+          categoryText.textContent = "No Data";
+          categoryText.className = "category-text no-category";
+          statusEl.textContent = "Waiting for detection data...";
+          return;
+        }
+
+        const data = JSON.parse(dataStr);
+        const now = Date.now();
+        const age = now - data.timestamp;
+
+        // Check if data is stale (older than 3 seconds)
+        if (age > 3000) {
+          categoryText.textContent = "No Detection";
+          categoryText.className = "category-text no-category";
+          statusEl.textContent = "No active detection (data stale)";
+          lastCategory = null;
+          return;
+        }
+
+        updateCount++;
+        const category = data.category;
+
+        if (category !== lastCategory) {
+          // Category changed - animate
+          categoryText.style.transform = "scale(0.9)";
+          setTimeout(() => {
+            categoryText.style.transform = "scale(1)";
+            categoryText.textContent = category || "Mixed";
+            categoryText.className = category 
+              ? "category-text active" 
+              : "category-text no-category";
+            
+            if (category) {
+              statusEl.textContent = `✓ ${category} category detected (${Math.floor(age/1000)}s ago)`;
+            } else {
+              statusEl.textContent = "No dominant category (mixed crowd)";
+            }
+          }, 150);
+          
+          lastCategory = category;
+        } else {
+          // Same category - just update status
+          if (category) {
+            statusEl.textContent = `✓ ${category} category (${Math.floor(age/1000)}s ago)`;
+          } else {
+            statusEl.textContent = "No dominant category (mixed crowd)";
+          }
+        }
+      } catch (e) {
+        console.error("Error reading category:", e);
+        categoryText.textContent = "Error";
+        categoryText.className = "category-text no-category";
+        statusEl.textContent = "Error reading data";
+      }
+    }
+
+    // Check for updates every 100ms
+    setInterval(updateCategory, 100);
+
+    // Also listen for storage events (when data changes in another tab)
+    window.addEventListener("storage", (e) => {
+      if (e.key === "dominantAgeCategory") {
+        updateCategory();
+      }
+    });
+
+    // Initial update
+    updateCategory();
+  </script>
+</body>
+</html>
+
