@@ -5,7 +5,7 @@ const path = require("path");
 const fetch = require("node-fetch");
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 const USERS_FILE = path.join(__dirname, "public", "users.json");
 const MODELS_DIR = path.join(__dirname, "public", "models");
 

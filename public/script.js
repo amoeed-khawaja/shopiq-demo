@@ -40,16 +40,16 @@ function calculateDominantCategory(detections) {
     }
   });
 
-  // Find category with 80%+ representation
+  // Find category with majority (50%+) representation
   const total = recentDetections.length;
   for (const [category, count] of Object.entries(categoryCounts)) {
     const percentage = (count / total) * 100;
-    if (percentage >= 80) {
+    if (percentage >= 50) {
       return category;
     }
   }
 
-  return null; // No category reaches 80% threshold
+  return null; // No category reaches 50% threshold
 }
 
 // Broadcast category to parallel page via localStorage
@@ -84,12 +84,9 @@ async function loadUsers() {
     const res = await fetch("/users.json");
     users = await res.json();
     if (users && users.length > 0) {
-      log.innerText = `Loaded ${users.length} stored users: ${users
-        .map((u) => u.id)
-        .join(", ")}`;
+      log.innerText = "System ready. Face the camera to begin detection.";
     } else {
-      log.innerText =
-        "Ready. No users registered yet. Face the camera to register.";
+      log.innerText = "Ready. Face the camera to register.";
     }
   } catch (e) {
     console.error("Failed loading users", e);
@@ -117,7 +114,7 @@ async function startVideo() {
       // Set display size to match video display size
       canvas.style.width = video.offsetWidth + "px";
       canvas.style.height = video.offsetHeight + "px";
-      log.innerText = `Camera active. Detecting faces... (${users.length} users loaded)`;
+      log.innerText = "Camera active. Detecting faces...";
       // Start detection immediately using requestAnimationFrame for smooth animation
       requestAnimationFrame(() => detectLoop());
     };
@@ -455,9 +452,7 @@ async function detectLoop() {
           // Update log if user count changed (check in background)
           if (users.length !== lastUserCount) {
             lastUserCount = users.length;
-            log.innerText = `Camera active. Detecting faces... (${
-              users.length
-            } users: ${users.map((u) => u.id).join(", ")})`;
+            log.innerText = "Camera active. Detecting faces...";
           }
         } else {
           // No detections - clear category
