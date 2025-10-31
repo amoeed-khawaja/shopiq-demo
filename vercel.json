@@ -1,51 +1,16 @@
 {
-    "version": 2,
-    "builds": [
+    "rewrites": [
         {
-            "src": "api/**/*.js",
-            "use": "@vercel/node"
-        }
-    ],
-    "routes": [
-        {
-            "src": "/api/ads/(.*)",
-            "dest": "/api/ads/$1"
+            "source": "/save",
+            "destination": "/api/save"
         },
         {
-            "src": "/api/(.*)",
-            "dest": "/api/$1"
+            "source": "/register_new",
+            "destination": "/api/register_new"
         },
         {
-            "src": "/save",
-            "dest": "/api/save"
-        },
-        {
-            "src": "/register_new",
-            "dest": "/api/register_new"
-        },
-        {
-            "src": "/users.json",
-            "dest": "/api/users"
-        },
-        {
-            "src": "/asset/(.*)",
-            "dest": "/asset/$1"
-        },
-        {
-            "src": "/models/(.*)",
-            "dest": "/public/models/$1"
-        },
-        {
-            "src": "/",
-            "dest": "/public/index.html"
-        },
-        {
-            "src": "/(.*\\.(html|css|js|json|png|jpg|jpeg|gif|webp|svg|ico))",
-            "dest": "/public/$1"
-        },
-        {
-            "src": "/(.*)",
-            "dest": "/public/$1"
+            "source": "/users.json",
+            "destination": "/api/users"
         }
     ],
     "headers": [
