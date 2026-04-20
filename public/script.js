@@ -4,8 +4,58 @@
 const video = document.getElementById("inputVideo");
 const canvas = document.getElementById("overlay");
 const log = document.getElementById("log");
+const zoneLogsEl = document.getElementById("zone-logs");
+const ZONE_LOGS_MAX = 20;
+
+function appendZoneLog(text) {
+  if (!zoneLogsEl) return;
+  const line = document.createElement("div");
+  line.className = "zone-log-line";
+  line.textContent = text;
+  zoneLogsEl.appendChild(line);
+  while (zoneLogsEl.children.length > ZONE_LOGS_MAX) {
+    zoneLogsEl.removeChild(zoneLogsEl.firstChild);
+  }
+  zoneLogsEl.scrollTop = zoneLogsEl.scrollHeight;
+}
 let users = []; // loaded from server: [{id, descriptors: [[...], ...]}, ...]
 const THRESHOLD = 0.55; // distance threshold for recognition (lower = stricter)
+
+// --- Zone (point-in-polygon) ---
+// Ray-casting: point (px, py) inside polygon (array of [x,y] in display space)?
+function pointInPolygon(px, py, polygon) {
+  const n = polygon.length;
+  if (n < 3) return false;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Zones from API use normalized coordinates (0–1). Convert to display space.
+function zonesToDisplaySpace(apiZones, canvasWidth, canvasHeight) {
+  const w = canvasWidth;
+  const h = canvasHeight;
+  if (!Array.isArray(apiZones) || apiZones.length === 0) return [];
+  return apiZones.map((z) => ({
+    id: z.id,
+    slug: z.slug,
+    name: z.name,
+    zone_category: z.zone_category,
+    store_name: z.store_name,
+    color: z.color || "rgba(74, 222, 128, 0.25)",
+    stroke: z.stroke || "#4ade80",
+    points: (z.points || []).map(([x, y]) => [x * w, y * h]),
+  }));
+}
+
+let zones = [];
+let lastZoneByKey = {}; // { [userId|"detection-N"]: zoneId|null }
 
 // Age category definitions
 function getAgeCategory(age) {
@@ -104,6 +154,17 @@ async function init() {
   }
 }
 
+async function loadZones() {
+  try {
+    const res = await fetch("/api/zones");
+    const list = await res.json();
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    console.error("Failed loading zones", e);
+    return [];
+  }
+}
+
 async function loadUsers() {
   try {
     const res = await fetch("/users.json");
@@ -131,16 +192,15 @@ async function startVideo() {
       audio: false,
     });
     video.srcObject = stream;
-    video.onloadedmetadata = () => {
+    video.onloadedmetadata = async () => {
       video.play();
-      // Ensure canvas dimensions match video dimensions exactly
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      // Set display size to match video display size
       canvas.style.width = video.offsetWidth + "px";
       canvas.style.height = video.offsetHeight + "px";
+      const apiZones = await loadZones();
+      zones = zonesToDisplaySpace(apiZones, canvas.width, canvas.height);
       log.innerText = "Camera active. Detecting faces...";
-      // Start detection immediately using requestAnimationFrame for smooth animation
       requestAnimationFrame(() => detectLoop());
     };
     video.onerror = (e) => {
@@ -252,6 +312,24 @@ function clearCanvas() {
   ctx.strokeStyle = "#00FF00";
 }
 
+function drawZones() {
+  if (!zones.length) return;
+  const ctx = canvas.getContext("2d");
+  for (const zone of zones) {
+    const pts = zone.points;
+    if (!pts || pts.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = zone.color || "rgba(74, 222, 128, 0.2)";
+    ctx.fill();
+    ctx.strokeStyle = zone.stroke || "#4ade80";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
 function euclideanDistance(a, b) {
   let sum = 0;
   for (let i = 0; i < a.length; i++) {
@@ -349,6 +427,7 @@ async function detectLoop() {
     // Draw cached boxes for smooth visual feedback
     if (lastBoxes.length > 0) {
       clearCanvas();
+      drawZones();
       for (const cached of lastBoxes) {
         drawBox(
           cached.box,
@@ -370,6 +449,7 @@ async function detectLoop() {
     // Draw cached boxes while waiting
     if (lastBoxes.length > 0) {
       clearCanvas();
+      drawZones();
       for (const cached of lastBoxes) {
         drawBox(
           cached.box,
@@ -407,13 +487,15 @@ async function detectLoop() {
         });
 
         clearCanvas();
+        drawZones();
         lastBoxes = []; // Clear cached boxes
 
         if (resizedDetections && resizedDetections.length > 0) {
           // Update current detections with age categories
           currentDetections = [];
 
-          for (const det of resizedDetections) {
+          for (let i = 0; i < resizedDetections.length; i++) {
+            const det = resizedDetections[i];
             const box = det.detection.box;
             const descriptor = Array.from(det.descriptor);
             const match = findBestMatch(descriptor);
@@ -448,6 +530,40 @@ async function detectLoop() {
               score = 0;
               registerNewUser(descriptor); // Non-blocking call
             }
+
+            // Zone: face point in display space (mirrored X), test point-in-polygon
+            const faceCenterX = canvas.width - box.x - box.width / 2;
+            const faceCenterY = box.y + box.height / 2;
+            let currentZone = null;
+            for (const z of zones) {
+              if (pointInPolygon(faceCenterX, faceCenterY, z.points)) {
+                currentZone = z;
+                break;
+              }
+            }
+            const key = match.user && match.distance < THRESHOLD ? match.user.id : "detection-" + i;
+            const lastZoneId = lastZoneByKey[key];
+            const currentZoneId = currentZone ? currentZone.id : null;
+            if (currentZoneId && currentZoneId !== lastZoneId) {
+              const userId = match.user && match.distance < THRESHOLD ? match.user.id : "guest";
+              const ts = new Date().toISOString();
+              const zoneLabel = currentZone.name || currentZoneId;
+              const categoryLabel = currentZone.zone_category ? ` (${currentZone.zone_category})` : "";
+              const msg = `${userId} entered ${zoneLabel}${categoryLabel} at ${ts}`;
+              console.log(msg);
+              appendZoneLog(msg);
+              window.dispatchEvent(
+                new CustomEvent("zoneEnter", {
+                  detail: { userId, zoneId: currentZoneId, zoneName: currentZone.name, timestamp: ts },
+                })
+              );
+              fetch("/api/zone-enter", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId, zoneId: currentZoneId, zoneName: currentZone.name, timestamp: ts }),
+              }).catch((e) => console.error("Zone log send failed", e));
+            }
+            if (currentZoneId !== lastZoneId) lastZoneByKey[key] = currentZoneId;
 
             // Draw box with age, gender, and category info
             drawBox(

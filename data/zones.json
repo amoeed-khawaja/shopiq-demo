@@ -1,0 +1,22 @@
+[
+  {
+    "id": "zone1",
+    "name": "Left Store",
+    "slug": "zone1",
+    "zone_category": "Electronics",
+    "store_name": "Tech Corner",
+    "color": "rgba(74, 222, 128, 0.25)",
+    "stroke": "#4ade80",
+    "points": [[0, 0], [0.2, 0], [0.2, 1], [0, 1]]
+  },
+  {
+    "id": "zone2",
+    "name": "Right Store",
+    "slug": "zone2",
+    "zone_category": "Fashion",
+    "store_name": "Style Hub",
+    "color": "rgba(59, 130, 246, 0.25)",
+    "stroke": "#3b82f6",
+    "points": [[0.8, 0], [1, 0], [1, 1], [0.8, 1]]
+  }
+]
