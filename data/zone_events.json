@@ -14,5 +14,21 @@
     "event": "enter",
     "created_at": "2026-02-25T19:09:38.745Z",
     "zone_category": "Electronics"
+  },
+  {
+    "user_id": "guest",
+    "zone_id": null,
+    "zone_name": "Left Store",
+    "event": "enter",
+    "created_at": "2026-06-03T18:09:12.648Z",
+    "zone_category": "Electronics"
+  },
+  {
+    "user_id": "user12",
+    "zone_id": null,
+    "zone_name": "Left Store",
+    "event": "enter",
+    "created_at": "2026-06-03T18:09:13.027Z",
+    "zone_category": "Electronics"
   }
 ]

@@ -11,8 +11,6 @@ const PORT = process.env.PORT || 3002;
 const MODELS_DIR = path.join(__dirname, "public", "models");
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_USERS_FILE = path.join(DATA_DIR, "users.json");
-const DATA_ZONE_EVENTS_FILE = path.join(DATA_DIR, "zone_events.json");
-const DATA_ZONES_FILE = path.join(DATA_DIR, "zones.json");
 const PUBLIC_USERS_LEGACY = path.join(__dirname, "public", "users.json");
 const SYNC_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
 
@@ -48,8 +46,6 @@ function normalizeUser(u) {
 }
 
 let usersStore = [];
-let zoneEventsBuffer = [];
-let zonesStore = [];
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -89,54 +85,7 @@ function persistUsersToFile() {
   fs.writeFileSync(DATA_USERS_FILE, JSON.stringify(usersStore, null, 2), "utf8");
 }
 
-function loadZoneEventsFromFile() {
-  ensureDataDir();
-  if (!fs.existsSync(DATA_ZONE_EVENTS_FILE)) {
-    zoneEventsBuffer = [];
-    return;
-  }
-  try {
-    const raw = JSON.parse(fs.readFileSync(DATA_ZONE_EVENTS_FILE, "utf8"));
-    zoneEventsBuffer = Array.isArray(raw) ? raw : [];
-  } catch (e) {
-    zoneEventsBuffer = [];
-  }
-}
-
-function persistZoneEventsToFile() {
-  ensureDataDir();
-  fs.writeFileSync(DATA_ZONE_EVENTS_FILE, JSON.stringify(zoneEventsBuffer, null, 2), "utf8");
-}
-
-const DEFAULT_ZONES = [
-  { id: "zone1", slug: "zone1", name: "Left Store", store_name: "Tech Corner", zone_category: "Electronics", color: "rgba(74, 222, 128, 0.25)", stroke: "#4ade80", points: [[0, 0], [0.2, 0], [0.2, 1], [0, 1]] },
-  { id: "zone2", slug: "zone2", name: "Right Store", store_name: "Style Hub", zone_category: "Fashion", color: "rgba(59, 130, 246, 0.25)", stroke: "#3b82f6", points: [[0.8, 0], [1, 0], [1, 1], [0.8, 1]] },
-];
-
-function loadZonesFromFile() {
-  ensureDataDir();
-  if (!fs.existsSync(DATA_ZONES_FILE)) {
-    zonesStore = DEFAULT_ZONES.slice();
-    persistZonesToFile();
-    return;
-  }
-  try {
-    const raw = JSON.parse(fs.readFileSync(DATA_ZONES_FILE, "utf8"));
-    zonesStore = Array.isArray(raw) ? raw : [];
-  } catch (e) {
-    console.error("Load zones.json error:", e.message);
-    zonesStore = [];
-  }
-}
-
-function persistZonesToFile() {
-  ensureDataDir();
-  fs.writeFileSync(DATA_ZONES_FILE, JSON.stringify(zonesStore, null, 2), "utf8");
-}
-
 loadUsersFromFile();
-loadZoneEventsFromFile();
-loadZonesFromFile();
 
 // Helper to download models if missing
 const MODEL_BASE =
@@ -233,10 +182,6 @@ async function downloadIfMissing() {
   console.log("Model download finished.");
 }
 
-app.get("/api/zones", (req, res) => {
-  res.json(zonesStore);
-});
-
 // Always serve from file-first store (seamless; DB sync runs in background)
 app.get("/users.json", (req, res) => {
   const result = usersStore.map((u) => ({
@@ -273,46 +218,6 @@ app.post("/save", (req, res) => {
   } catch (e) {
     console.error("Save error", e);
     return res.status(500).json({ error: "save failed" });
-  }
-});
-
-app.post("/api/zone-enter", (req, res) => {
-  try {
-    const { userId, zoneId, zoneName, timestamp } = req.body || {};
-    const name = zoneName || zoneId || "zone";
-    const ts = timestamp || new Date().toISOString();
-    console.log(`${userId || "user"} entered ${name} at ${ts}`);
-
-    const zone = zonesStore.find((z) => z.id === zoneId || z.slug === zoneId);
-    const zone_category = zone ? zone.zone_category : null;
-    if (userId && userId !== "guest" && zone_category) {
-      const user = usersStore.find((u) => u.id === userId);
-      if (user) {
-        if (!user.interests) user.interests = [];
-        if (!user.interests.includes(zone_category)) {
-          user.interests.push(zone_category);
-          persistUsersToFile();
-        }
-      }
-    }
-
-    const isUuid =
-      zoneId &&
-      typeof zoneId === "string" &&
-      /^[0-9a-f-]{36}$/i.test(zoneId);
-    zoneEventsBuffer.push({
-      user_id: userId || "guest",
-      zone_id: isUuid ? zoneId : null,
-      zone_name: name,
-      event: "enter",
-      created_at: ts,
-      zone_category: zone_category || null,
-    });
-    persistZoneEventsToFile();
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error("Zone enter log error", e);
-    return res.status(500).json({ error: "log failed" });
   }
 });
 
@@ -394,21 +299,6 @@ app.get("/api/ads/:category", (req, res) => {
 async function syncToSupabase() {
   if (!useSupabase) return;
   try {
-    for (const z of zonesStore) {
-      await supabase.from("zones").upsert(
-        {
-          slug: z.slug || z.id,
-          name: z.name,
-          zone_category: z.zone_category,
-          store_name: z.store_name,
-          color: z.color,
-          stroke: z.stroke,
-          points: z.points,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "slug" }
-      );
-    }
     for (const u of usersStore) {
       await supabase.from("users").upsert(
         {
@@ -438,33 +328,8 @@ async function syncToSupabase() {
         );
       }
     }
-    const toSync = zoneEventsBuffer.slice();
-    zoneEventsBuffer = [];
-    persistZoneEventsToFile();
-    for (const ev of toSync) {
-      await supabase.from("zone_events").insert({
-        user_id: ev.user_id,
-        zone_id: ev.zone_id,
-        zone_name: ev.zone_name,
-        event: ev.event,
-        created_at: ev.created_at,
-      });
-      const category = ev.zone_category || (ev.zone_id && (await supabase.from("zones").select("zone_category").eq("id", ev.zone_id).single()).data?.zone_category);
-      if (category && ev.user_id && ev.user_id !== "guest") {
-        await supabase.from("user_interests").upsert(
-          {
-            user_id: ev.user_id,
-            category,
-            zone_id: ev.zone_id,
-            first_entered_at: ev.created_at,
-            created_at: ev.created_at,
-          },
-          { onConflict: "user_id,category", ignoreDuplicates: true }
-        );
-      }
-    }
-    if (usersStore.length > 0 || toSync.length > 0 || zonesStore.length > 0) {
-      console.log("[Sync] DB updated: users=" + usersStore.length + ", zones=" + zonesStore.length + ", zone_events=" + toSync.length);
+    if (usersStore.length > 0) {
+      console.log("[Sync] DB updated: users=" + usersStore.length);
     }
   } catch (e) {
     console.error("[Sync] Error:", e.message);
